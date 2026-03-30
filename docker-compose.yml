@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  rwgps-sync:
+    image: python:3.12-slim
+    container_name: rwgps-sync
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "pip install requests paho-mqtt==1.6.1 -q &&
+             python -u sync.py"
+    volumes:
+      - /your/path/rwgps-sync/app:/app
+      - /your/path/rwgps-sync/data:/data
+    environment:
+      # Ride With GPS credentials (from Step 1)
+      RWGPS_API_KEY:    "your_api_key_here"
+      RWGPS_AUTH_TOKEN: "your_auth_token_here"
+      RWGPS_USER_ID:    "your_numeric_user_id"
+
+      # Home Assistant MQTT (from Step 2) — set to "false" to disable
+      MQTT_ENABLED:     "true"
+      MQTT_HOST:        "192.168.1.x"
+      MQTT_PORT:        "1883"
+      MQTT_USER:        "mqtt"
+      MQTT_PASS:        "your_mqtt_password"
+
+      # Sync schedule
+      SYNC_INTERVAL_MINUTES: "30"
+
+      # Database path (inside the container)
+      DB_PATH: "/data/rides.db"
