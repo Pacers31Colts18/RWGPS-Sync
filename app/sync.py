@@ -82,8 +82,11 @@ def init_db(conn):
     conn.commit()
 
 
-def upsert_ride(conn, ride):
-    conn.execute("""
+def upsert_rides(conn, rides):
+    """Deduplicate by id and bulk-insert all rides in a single transaction."""
+    # Keep only the last occurrence of each id (in case pagination returned duplicates)
+    deduped_list = list({r["id"]: r for r in rides}.values())
+    conn.executemany("""
         INSERT INTO rides (
             id, name, departed_at, distance_mi, duration_s, moving_time_s,
             avg_speed_mph, max_speed_mph, elevation_gain_ft,
@@ -109,8 +112,9 @@ def upsert_ride(conn, ride):
             calories=excluded.calories,
             locality=excluded.locality,
             fetched_at=excluded.fetched_at
-    """, ride)
+    """, deduped_list)
     conn.commit()
+    return len(deduped_list)
 
 
 def get_known_ids(conn):
@@ -328,10 +332,11 @@ def run_sync(conn, mqtt_client=None, full_sync=False):
     log.info("Known ride IDs in DB: %d", len(known_ids))
 
     new_trips = fetch_all_trips(known_ids, full_sync=full_sync)
-    log.info("New/updated trips fetched: %d", len(new_trips))
+    log.info("Trips fetched (before dedup): %d", len(new_trips))
 
-    for trip in new_trips:
-        upsert_ride(conn, trip)
+    if new_trips:
+        saved = upsert_rides(conn, new_trips)
+        log.info("Trips saved to DB (after dedup): %d", saved)
 
     if new_trips and mqtt_client and MQTT_ENABLED:
         payload = build_state_payload(conn)
