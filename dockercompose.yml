@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  rwgps-sync:
+    image: python:3.12-slim
+    container_name: rwgps-sync
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "pip install requests paho-mqtt==1.6.1 -q &&
+             python -u sync.py"
+    volumes:
+      - /volume2/docker/rwgps-sync/app:/app
+      - /volume2/docker/rwgps-sync/data:/data
+    environment:
+      RWGPS_API_KEY:    "" #Your API Key
+      RWGPS_AUTH_TOKEN: "" #Your Auth Token
+      RWGPS_USER_ID:    "" #Your User Id
+      MQTT_ENABLED:     "true"
+      MQTT_HOST:        "192.168.1.1" #Your HA IP Address
+      MQTT_PORT:        "1883"
+      MQTT_USER:        "" #Your MQTT username
+      MQTT_PASS:        "" #Your MQTT password
+      SYNC_INTERVAL_MINUTES: "30"
+      DB_PATH:          "/data/rides.db"
