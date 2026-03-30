@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# Config from environment
+# ── Config from environment ────────────────────────────────────────────────────
 RWGPS_API_KEY    = os.environ["RWGPS_API_KEY"]
 RWGPS_AUTH_TOKEN = os.environ["RWGPS_AUTH_TOKEN"]
 RWGPS_USER_ID    = os.environ["RWGPS_USER_ID"]
@@ -37,12 +37,12 @@ DB_PATH          = os.environ.get("DB_PATH", "/data/rides.db")
 RWGPS_BASE       = "https://ridewithgps.com"
 PAGE_SIZE        = 100
 
-#  Unit helpers
+# ── Unit helpers ───────────────────────────────────────────────────────────────
 def meters_to_miles(m):
     return round(m / 1609.344, 2) if m else 0.0
 
-def mps_to_mph(mps):
-    return round(mps * 2.23694, 2) if mps else 0.0
+def kmh_to_mph(kmh):
+    return round(kmh * 0.621371, 2) if kmh else 0.0
 
 def seconds_to_hms(s):
     if not s:
@@ -51,7 +51,7 @@ def seconds_to_hms(s):
     m, sec = divmod(rem, 60)
     return f"{h}:{m:02d}:{sec:02d}"
 
-# Database
+# ── Database ───────────────────────────────────────────────────────────────────
 def init_db(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS rides (
@@ -71,6 +71,12 @@ def init_db(conn):
             calories          REAL,
             locality          TEXT,
             fetched_at        TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sync_meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT
         )
     """)
     conn.commit()
@@ -133,7 +139,7 @@ def get_lifetime_stats(conn):
     return dict(zip(keys, row)) if row else {}
 
 
-# RWGPS API
+# ── RWGPS API ──────────────────────────────────────────────────────────────────
 def rwgps_headers():
     return {
         "x-rwgps-api-key":    RWGPS_API_KEY,
@@ -173,8 +179,8 @@ def parse_trip(raw):
         "distance_mi":       meters_to_miles(raw.get("distance", 0)),
         "duration_s":        raw.get("duration", 0),
         "moving_time_s":     raw.get("moving_time", 0),
-        "avg_speed_mph":     mps_to_mph(raw.get("avg_speed", 0)),
-        "max_speed_mph":     mps_to_mph(raw.get("max_speed", 0)),
+        "avg_speed_mph":     kmh_to_mph(raw.get("avg_speed", 0)),
+        "max_speed_mph":     kmh_to_mph(raw.get("max_speed", 0)),
         "elevation_gain_ft": round(eg_m * 3.28084, 1),
         "avg_hr":            raw.get("avg_hr") or raw.get("avg_heart_rate"),
         "max_hr":            raw.get("max_hr") or raw.get("max_heart_rate"),
@@ -231,7 +237,7 @@ def fetch_all_trips(known_ids, full_sync=False):
     return trips
 
 
-# MQTT / Home Assistant
+# ── MQTT / Home Assistant ──────────────────────────────────────────────────────
 DISCOVERY_PREFIX = "homeassistant"
 NODE_ID          = "rwgps"
 
@@ -316,7 +322,7 @@ def build_state_payload(conn):
     }
 
 
-# Main loop
+# ── Main loop ──────────────────────────────────────────────────────────────────
 def run_sync(conn, mqtt_client=None, full_sync=False):
     known_ids = get_known_ids(conn)
     log.info("Known ride IDs in DB: %d", len(known_ids))
@@ -336,12 +342,28 @@ def run_sync(conn, mqtt_client=None, full_sync=False):
     log.info("Total rides in DB: %d", total)
 
 
+def migrate_speed_units(conn):
+    """One-time migration: clear bad speed values so they re-sync with correct km/h→mph conversion."""
+    meta = conn.execute("SELECT value FROM sync_meta WHERE key='speed_unit_fixed'").fetchone()
+    if meta:
+        return
+    count = conn.execute("SELECT COUNT(*) FROM rides").fetchone()[0]
+    if count > 0:
+        log.info("Migrating speed units — clearing %d rows for re-sync…", count)
+        conn.execute("DELETE FROM rides")
+        conn.commit()
+        log.info("Speed unit migration complete. Rides will re-sync on next run.")
+    conn.execute("INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('speed_unit_fixed', '1')")
+    conn.commit()
+
+
 def main():
     log.info("=== Ride With GPS Sync starting ===")
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     init_db(conn)
+    migrate_speed_units(conn)
 
     mqtt_client = None
     if MQTT_ENABLED:
