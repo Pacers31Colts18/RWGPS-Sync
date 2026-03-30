@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ── Config from environment ────────────────────────────────────────────────────
+# Config from environment
 RWGPS_API_KEY    = os.environ["RWGPS_API_KEY"]
 RWGPS_AUTH_TOKEN = os.environ["RWGPS_AUTH_TOKEN"]
 RWGPS_USER_ID    = os.environ["RWGPS_USER_ID"]
@@ -37,7 +37,7 @@ DB_PATH          = os.environ.get("DB_PATH", "/data/rides.db")
 RWGPS_BASE       = "https://ridewithgps.com"
 PAGE_SIZE        = 100
 
-# ── Unit helpers ───────────────────────────────────────────────────────────────
+#  Unit helpers
 def meters_to_miles(m):
     return round(m / 1609.344, 2) if m else 0.0
 
@@ -51,7 +51,7 @@ def seconds_to_hms(s):
     m, sec = divmod(rem, 60)
     return f"{h}:{m:02d}:{sec:02d}"
 
-# ── Database ───────────────────────────────────────────────────────────────────
+# Database
 def init_db(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS rides (
@@ -133,7 +133,7 @@ def get_lifetime_stats(conn):
     return dict(zip(keys, row)) if row else {}
 
 
-# ── RWGPS API ──────────────────────────────────────────────────────────────────
+# RWGPS API
 def rwgps_headers():
     return {
         "x-rwgps-api-key":    RWGPS_API_KEY,
@@ -231,7 +231,7 @@ def fetch_all_trips(known_ids, full_sync=False):
     return trips
 
 
-# ── MQTT / Home Assistant ──────────────────────────────────────────────────────
+# MQTT / Home Assistant
 DISCOVERY_PREFIX = "homeassistant"
 NODE_ID          = "rwgps"
 
@@ -316,7 +316,7 @@ def build_state_payload(conn):
     }
 
 
-# ── Main loop ──────────────────────────────────────────────────────────────────
+# Main loop
 def run_sync(conn, mqtt_client=None, full_sync=False):
     known_ids = get_known_ids(conn)
     log.info("Known ride IDs in DB: %d", len(known_ids))
