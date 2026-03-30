@@ -152,11 +152,11 @@ def rwgps_headers():
     }
 
 
-def fetch_trips_page(page):
+def fetch_trips_page(offset):
     """Returns (trips_list, total_count)."""
     url = f"{RWGPS_BASE}/users/{RWGPS_USER_ID}/trips.json"
     resp = requests.get(url, headers=rwgps_headers(), params={
-        "page": page, "page_size": PAGE_SIZE
+        "offset": offset, "limit": PAGE_SIZE
     }, timeout=30)
     resp.raise_for_status()
     data = resp.json()
@@ -198,13 +198,14 @@ def parse_trip(raw):
 
 def fetch_all_trips(known_ids, full_sync=False):
     trips = []
-    page = 1
+    offset = 0
     total_count = None
 
     while True:
-        log.info("Fetching page %d%s…", page,
-                 f" of {-(-total_count // PAGE_SIZE)}" if total_count else "")
-        raw_list, total_count = fetch_trips_page(page)
+        page_num = (offset // PAGE_SIZE) + 1
+        total_pages = ((-(-total_count // PAGE_SIZE)) if total_count else "?")
+        log.info("Fetching page %s of %s… (offset %d)", page_num, total_pages, offset)
+        raw_list, total_count = fetch_trips_page(offset)
 
         if not raw_list:
             log.info("Empty page — done fetching.")
@@ -217,9 +218,9 @@ def fetch_all_trips(known_ids, full_sync=False):
                 trips.append(parsed)
                 new_this_page += 1
 
-        fetched_so_far = (page - 1) * PAGE_SIZE + len(raw_list)
-        log.info("Page %d: %d new trips (total fetched: %d/%s)",
-                 page, new_this_page, fetched_so_far, total_count or "?")
+        fetched_so_far = offset + len(raw_list)
+        log.info("Page %s: %d new trips (total fetched: %d/%s)",
+                 page_num, new_this_page, fetched_so_far, total_count or "?")
 
         # Stop if incremental and all on this page are known
         if new_this_page == 0 and not full_sync:
@@ -235,7 +236,7 @@ def fetch_all_trips(known_ids, full_sync=False):
         if len(raw_list) < PAGE_SIZE:
             break
 
-        page += 1
+        offset += PAGE_SIZE
         time.sleep(0.5)
 
     return trips
@@ -359,6 +360,22 @@ def migrate_speed_units(conn):
         conn.commit()
         log.info("Speed unit migration complete. Rides will re-sync on next run.")
     conn.execute("INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('speed_unit_fixed', '1')")
+    conn.execute("DELETE FROM sync_meta WHERE key='offset_pagination_fixed'")
+    conn.commit()
+
+
+def migrate_pagination(conn):
+    """One-time migration: clear rides so they re-sync using correct offset pagination."""
+    meta = conn.execute("SELECT value FROM sync_meta WHERE key='offset_pagination_fixed'").fetchone()
+    if meta:
+        return
+    count = conn.execute("SELECT COUNT(*) FROM rides").fetchone()[0]
+    if count > 0:
+        log.info("Pagination fix migration — clearing %d rides for clean re-sync…", count)
+        conn.execute("DELETE FROM rides")
+        conn.commit()
+        log.info("Rides cleared. Will re-sync with correct offset pagination.")
+    conn.execute("INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('offset_pagination_fixed', '1')")
     conn.commit()
 
 
@@ -369,6 +386,7 @@ def main():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     init_db(conn)
     migrate_speed_units(conn)
+    migrate_pagination(conn)
 
     mqtt_client = None
     if MQTT_ENABLED:
